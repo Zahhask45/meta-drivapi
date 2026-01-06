@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TypeAlias, Dict, List, Tuple
 import xml.etree.ElementTree as ET  # standard XML parser
+import json  # for JSON parsing
 import os  # to check if files exist
 
 # Define a readable alias type for YAML-like config values.
@@ -117,49 +118,38 @@ def junit_pass_rate_validator(configuration: dict[str, yaml]) -> tuple[float, li
         return (0.0, [e])
 
 
-# -----------------------------
-# Cppcheck error count validator
-# -----------------------------
-def cppcheck_error_validator(configuration: dict[str, yaml]) -> tuple[float, list[Exception | Warning]]:
+# -----------------------------------------
+# CodeQl validator
+# -----------------------------------------
+def codeql_sarif_validator(configuration: dict[str, yaml]) -> tuple[float, list[Exception | Warning]]:
     """
-    Parse cppcheck XML and count <error> elements.
-    Returns (1.0, []) if zero errors, else (0.0, []).
-    If something goes wrong reading the file, returns (0.0, [Exception]).
+    Read a CodeQL SARIF JSON file and compute the number of errors.
+    Returns (score, errors_list).
+    - score = 1.0 if no errors found
+    - otherwise score = 0.0
+    If an error happens, returns (0.0, [Exception]).
     """
     try:
         cfg = configuration or {}
         path = _path_from_config(cfg)
         if not path:
-            return (0.0, [ValueError("No cppcheck xml path provided")])
+            return (0.0, [ValueError("No path provided in validator configuration (references or path).")])
         if not os.path.exists(path):
             return (0.0, [FileNotFoundError(path)])
 
-        tree = ET.parse(path)
-        root = tree.getroot()
+        # Load the SARIF JSON file
+        with open(path, 'r', encoding='utf-8') as f:
+            sarif_data = json.load(f)
 
-        # Many cppcheck outputs include a top-level <errors> element whose children are <error>.
-        errors_element = root.find("errors")
-
-        # determine which severities count as failures (accept single value or list)
-        fail_severities = cfg.get("fail_on_severity", ["error"])
-        if not isinstance(fail_severities, list):
-            fail_severities = [fail_severities]
-
-        # count only errors whose severity is in fail_severities
-        if errors_element is not None:
-            candidates = errors_element.findall("error")
-        else:
-            candidates = root.findall(".//error")
-
+        # Count the number of results with level "error"
         error_count = 0
-        for err in candidates:
-            severity = err.attrib.get("severity")
-            if severity in fail_severities:
-                error_count += 1
+        for run in sarif_data.get("runs", []):
+            for result in run.get("results", []):
+                if result.get("level") == "error":
+                    error_count += 1
 
-        # allowed number of errors (here hard-coded to zero).
-        allowed = 0
-        score = 1.0 if error_count <= allowed else 0.0
+        # Determine score based on error count
+        score = 1.0 if error_count == 0 else 0.0
 
         return (score, [])
 
