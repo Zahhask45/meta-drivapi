@@ -25,11 +25,6 @@ jobs:
           sudo gem install ceedling
           pip install gcovr
 
-      - name: Install Python tools (gcovr)
-        run: |
-          python -m pip install --upgrade pip
-          pip install gcovr
-
       - name: Configure and Build with CMake
         run: |
           cmake -B "${{ inputs.build_dir }}" -S . -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="--coverage"
