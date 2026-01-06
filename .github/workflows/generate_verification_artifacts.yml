@@ -19,10 +19,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Install system packages
+      - name: Install Test Dependencies (Ceedling stack)
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y build-essential cmake cppcheck lcov
+          sudo apt-get update && sudo apt-get install -y ruby ruby-dev build-essential cmake
+          sudo gem install ceedling
+          pip install gcovr
 
       - name: Install Python tools (gcovr)
         run: |
