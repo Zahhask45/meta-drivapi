@@ -18,7 +18,10 @@ reviewers:
 # Auto-approved for this task
 reviewed: '2026-01-05 - Approved by Melanie Reis <melanie.reis@seame.pt>'
 
-references: []
+references:
+  - type: "file"
+    path: "docs/standards/iso26262/hara-motor-speed.md"
+    description: "HARA Hazard H-01 (Need for speed monitoring to prevent injury)"
 
 active: true
 derived: false
