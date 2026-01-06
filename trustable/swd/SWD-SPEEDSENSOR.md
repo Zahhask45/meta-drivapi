@@ -30,7 +30,7 @@ reviewed: '2026-01-05 - Approved by Bernardo Esteves <bernardo.esteves@seame.pt>
 # Evidence Linking
 references:
   - type: "file"
-    path: "Core/Src/speed_sensor.c"
+    path: "Threadx/Core/Src/speed_sensor.c"
     description: "Source code implementation"
 
   - type: "file"
