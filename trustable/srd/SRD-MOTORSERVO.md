@@ -1,5 +1,5 @@
 ---
-id: SRD-SERVOMOTOR
+id: SRD-MOTORSERVO
 header: "PWM Actuator Interface"
 text: |
   "The system shall control the DC Motor and Steering Servo via the PCA9685 driver, mapping logical inputs to calibrated 12-bit PWM pulse widths."
@@ -8,9 +8,9 @@ text: |
 verification_method: "Integration Testing"
 
 parents:
-  - id: URD-SERVOMOTOR
+  - id: URD-MOTORSERVO
 children:
-  - id: SWD-SERVOMOTOR
+  - id: SWD-MOTORSERVO
 
 reviewers:
   - name: "Melanie Reis"
