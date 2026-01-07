@@ -13,10 +13,10 @@ children:
   - id: SWD-SERVOMOTOR
 
 reviewers:
-  - name: "System Architect"
-    email: "arch@drivapi.com"
+  - name: "Melanie Reis"
+    email: "melanie.reis@seame.pt"
 
-reviewed: '2026-01-07 - Approved by Architect'
+reviewed: '2026-01-07 - Approved by Melanie Reis'
 
 references:
   - type: "file"
