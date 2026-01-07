@@ -1,157 +1,181 @@
-# SEAME Automotive Journey
+# meta-cross: Cross-Compilation Layer for Rust on Raspberry Pi 5
 
-Autonomous vehicle using PiRacer as part of the SEAME automotive program.
+## Overview
 
-## Team: DrivaPi (Team04)
-Hugo, João, Bernardo, Miguel, Melanie
+This Yocto/OpenEmbedded meta-layer provides BitBake recipes for cross-compiling Rust applications to run on Raspberry Pi 5 with Automotive Grade Linux (AGL).
 
----
-
-## 🎯 What We're Building
-
-- Computer vision and autonomous driving
-- Real-time control systems (ThreadX RTOS)
-- Qt-based interface
-- Automotive industry standard architecture
-- **Requirements management with TSF**
-
-**Platform:** PiRacer with Raspberry Pi 5
+**Target:** `aarch64` (ARM 64-bit)  
+**Build System:** Yocto Project / OpenEmbedded  
+**Compatible Releases:** Scarthgap
 
 ---
 
-## 🛠️ Tech Stack
+## Layer Information
 
-| Category | Technology |
-|----------|------------|
-| **OS** | Automotive Grade Linux (AGL) |
-| **RTOS** | ThreadX |
-| **Language** | C++ (+ Rust evaluation) |
-| **GUI** | Qt framework |
-| **Requirements** | TSF (Trustable Software Framework) |
-| **Standards** | ISO 26262 |
+- **Layer Name:** `meta-cross`
+- **Priority:** 6
+- **Maintainer:** Team04 - DrivaPi
+- **License:** MIT-0 (see COPYING.MIT-0)
 
 ---
 
-## 📁 Repository Structure
+## Dependencies
+
+This layer depends on:
+
+- **openembedded-core** (meta)
+- **meta-agl** (Automotive Grade Linux base layer)
+- **meta-raspberrypi** (Raspberry Pi hardware support)
+- **meta-rust** (Rust toolchain support, typically included via meta-openembedded)
+
+---
+
+## Layer Structure
 
 ```
-.
-├── reqs/                  # TSF Requirements
-│   ├── urd/              # User Requirements
-│   ├── srd/              # System Requirements
-│   ├── swd/              # Software Design
-│   └── lltc/             # Test Cases
-│
-├── src/                  # Source code
-├── tests/                # Unit/integration/system tests
-├── docs/                 # Documentation
-│   ├── standups/        # Daily stand-ups
-│   └── tsf/             # TSF docs
-│
-├── artifacts/
-│   ├── trustable-report/ # TSF reports
-│   ├── verification/     # Test results, analysis
-│   └── baselines/        # Release snapshots
-│
-└── .dotstop.dot          # TSF traceability graph
+meta-cross/
+├── conf/
+│   └── layer.conf              # Layer configuration
+├── recipes-rust/
+│   └── controller/
+│       ├── controller_0.1.0.bb # BitBake recipe
+│       └── files/
+│           └── controller/     # Rust application source
+├── COPYING.MIT-0               # Layer license
+└── README.md                   # This file
 ```
 
-## 📋 TSF Documentation
+---
 
-| Doc | When to Use | Time |
-|-----|-------------|------|
-| **[start.md](docs/tsf/start.md)** | First time, setup | 15 min |
-| **[reference.md](docs/tsf/reference.md)** | Cheat sheet, commands | Reference |
-| **[workflow.md](docs/tsf/workflow.md)** | Create requirements, review | Reference |
-| **[training.md](docs/tsf/training.md)** | Understand TSF/ISO 26262 theory | 1-2h |
-| **[evidence.md](docs/tsf/evidence.md)** | Link artifacts | Reference |
+## Usage
+
+### 1. Add Layer to Your Build
+
+After sourcing the AGL environment, add this layer to your `bblayers.conf`:
+
+```bash
+bitbake-layers add-layer /path/to/meta-cross
+```
+
+Or manually edit `build/conf/bblayers.conf`:
+
+```
+BBLAYERS += "${TOPDIR}/../meta-cross"
+```
+
+### 2. Build Rust Applications
+
+```bash
+bitbake controller
+```
+
+### 3. Deploy to Target
+
+The compiled binary will be available in:
+```
+build/tmp/deploy/images/raspberrypi5/
+```
 
 ---
 
-## 👥 Team Practices
+## Recipes
 
-### Daily Stand-Ups
+### controller (v0.1.0)
 
-- **Morning:** Quick sync (~10 min)
-- **Evening:** Progress review (~15 min)
-- **Facilitator:** Melanie
-- **Docs:** [documents/standups/](documents/standups/)
+Rust-based control system for PiRacer platform.
 
-### Workflow
+**Features:**
+- Real-time gamepad input handling
+- I2C hardware communication via `rppal`
+- PCA9685 PWM controller support
 
-1. Create branch
-2. Create requirements (`trudag manage create-item`)
-3. Implement (code, tests, docs)
-4. Link artifacts to requirements
-5. Validate (`trudag manage lint`)
-6. Create PR (2 reviews for ASIL B)
-7. Merge
-
-**Commit format:** `<type>(<scope>): <description>`
-- Types: `feat`, `fix`, `docs`, `test`, `review`
-- Scopes: `urd`, `srd`, `swd`, `lltc`, `hmi`, `sensor`
+**Binary Location:** `/usr/bin/controller`
 
 ---
 
-## 📈 Progress
+## Configuration
 
-| Date | Achievement |
-|------|-------------|
-| Oct 8 | Hardware setup initiated |
-| Oct 9 | Assembly finalized with custom parts |
-| Oct 10 | Qt app created, ThreadX selected |
-| Oct 13 | Sprint 1 starts, AGL deployment |
-| Oct 14 | TSF framework integrated |
+### Layer Compatibility
 
-**Current Sprint:** Sprint 1 (Oct 13-25)
-**Status:** ~90% hardware, dev environment setup, TSF operational
+This layer is compatible with Yocto Scarthgap release. Update `LAYERSERIES_COMPAT_cross` in `conf/layer.conf` for other releases.
+
+### Rust Toolchain
+
+The layer inherits the `cargo` class and uses the Rust cross-compilation toolchain provided by meta-rust/openembedded.
 
 ---
 
-## 📊 Traceability Status
+## Integration with AGL
 
-**Current baseline:** Sprint 1
-- 1 example URD (User Requirements) ✅
-- 1 example SRD (System Requirements) ✅
-- 1 example SWD (Software Design) ✅
-- 1 example LLTC (Test Cases) ✅
-- 100% reviewed ✅
-- Complete V-Model chain ✅
+This layer is designed to work with the AGL Trout release (v20.0.1+) for Raspberry Pi 5.
 
-**View report:** [artifacts/trustable-report/dashboard.md](artifacts/trustable-report/dashboard.md)
+**Typical setup:**
+```bash
+# Initialize AGL environment
+source meta-agl/scripts/aglsetup.sh -m raspberrypi5 agl-all-features
 
----
+# Add meta-cross layer
+bitbake-layers add-layer ../meta-cross
 
-## 📚 Standards Compliance
-
-- **ISO 26262:** Functional safety
-  - ASIL levels assigned
-  - Hazard analysis
-  - V-Model development
-
-- **TSF:** Trustable Software Framework
-  - Requirements traceability
-  - Evidence-based trust
-  - Git audit trail
+# Build image with Rust controller
+bitbake agl-demo-platform
+```
 
 ---
 
-## 👤 Team Roles
+## Development
 
-| Member | Focus |
-|--------|-------|
-| **Hugo** | Hardware, fabrication, QT deployment |
-| **João** | OS, dev environment |
-| **Bernardo** | Hardware integration, testing |
-| **Miguel** | GitHub, Agile/Scrum |
-| **Melanie** | GUI, coordination, requirements |
+### Adding New Rust Recipes
+
+1. Create recipe directory: `recipes-rust/<app-name>/`
+2. Add BitBake recipe: `<app-name>_<version>.bb`
+3. Place source in: `files/<app-name>/`
+4. Inherit `cargo` class and define installation
+
+Example minimal recipe:
+```bitbake
+SUMMARY = "My Rust application"
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=..."
+
+SRC_URI = "file://my-app"
+S = "${WORKDIR}/my-app"
+
+inherit cargo
+
+do_install() {
+    install -d ${D}${bindir}
+    install -m 0755 target/${RUST_TARGET_SYS}/release/my-app ${D}${bindir}
+}
+```
 
 ---
 
-## 📜 License
+## Testing
 
-Educational project - SEAME Automotive Program
+Tested with:
+- **AGL Version:** Trout (v20.0.1)
+- **Yocto Release:** Scarthgap
+- **Target Hardware:** Raspberry Pi 5
+- **Host System:** Ubuntu 20.04+
 
 ---
 
-*Last update: Oct 21, 2025 | Sprint 1 | Active development*
+## Contributing
+
+This layer is part of the Team04 DrivaPi project for the SEAME Automotive Program.
+
+**Team Members:** Hugo, João, Bernardo, Miguel, Melanie
+
+---
+
+## Support
+
+For issues or questions, refer to the main project documentation:
+- [Main Repository](../README.md)
+- [AGL Documentation](../docs/software/agl/)
+- [Rust Control System](../docs/software/control_system_rust.md)
+
+---
+
+*Last updated: December 18, 2025*
