@@ -1,5 +1,5 @@
 ---
-id: URD-SERVOMOTOR
+id: URD-MOTORSERVO
 header: "Vehicle Motion Control"
 text: |
   "The DrivaPi system shall provide unified control over vehicle actuators (Motor and Servo) to execute operator motion commands reliably."
@@ -8,7 +8,7 @@ text: |
 verification_method: "System Testing"
 
 children:
-  - id: SRD-SERVOMOTOR
+  - id: SRD-MOTORSERVO
 
 reviewers:
   - name: "Melanie Reis"
