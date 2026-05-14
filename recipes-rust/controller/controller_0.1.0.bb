@@ -11,6 +11,9 @@ inherit cargo
 inherit cargo-update-recipe-crates
 include controller-crates.inc
 
+# crates.io rejects generic wget requests with HTTP 403.
+FETCHCMD_wget = "/usr/bin/env wget --user-agent='cargo 1.81.0' -t 2 -T 100"
+
 CARGO_BUILD_FLAGS += "--locked"
 
 do_install() {
