@@ -1,4 +1,7 @@
+mod stanley;
+mod perception;
 use socketcan::Socket;
+
 use socketcan::{CanFrame, CanSocket, EmbeddedFrame, StandardId};
 use std::collections::HashMap;
 use std::fs::File;
@@ -6,6 +9,8 @@ use std::io::{ErrorKind, Read};
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::{sync::mpsc, thread, time::Duration};
+use std::net::UdpSocket;
+use std::time::Instant;
 
 /* CAN Protocol Constants */
 const CAN_ID_MOTOR: u16 = 44;
@@ -27,10 +32,9 @@ const REVERSE: u8 = 2;
 const BRAKE: u8 = 3;
 
 /* Servo Constants */
-const MAX_SERVO_ANGLE: f64 = 105.0;
-const MIN_SERVO_ANGLE: f64 = 75.0;
+const MAX_SERVO_ANGLE: f64 = 180.0;
+const MIN_SERVO_ANGLE: f64 = 0.0;
 const MID_SERVO_ANGLE: f64 = 90.0;
-const SERVO_RANGE: f64 = 15.0; // Distance from center to min/max
 
 /* Gamepad Constants */
 const GAMEPAD_DEVICE: &str = "/dev/input/js0";
@@ -45,7 +49,8 @@ pub struct Vector2f {
     y: f64,
 }
 
-
+#[derive(PartialEq, Debug)]
+enum DriveMode { Manual, Autonomous }
 
 /* Gamepad Input Struct 
     -> Struct serves the point of storing the values for each button in the GamePad
@@ -335,7 +340,7 @@ fn recv_latest_input(
 fn run_manual_mode(
     input_rx: &mpsc::Receiver<GamepadInput>,
     controller: &MotorController,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Option<DriveMode>, Box<dyn std::error::Error>> {
     println!("MANUEL MODE - Press B to exit");
 // =================================================================================
 //                              INIT HELPER VARIABLES
@@ -350,6 +355,8 @@ fn run_manual_mode(
     let mut cruise_control_enabled = false;
     let mut cruise_direction: u8 = NEUTRAL;
     let mut cruise_speed: u32 = 0;
+
+    let mut next_mode: Option<DriveMode> = None;
     
 // =================================================================================
 
@@ -375,6 +382,17 @@ fn run_manual_mode(
             println!("Exiting MANUEL mode");
             controller.stop_dc_motors()?;
             controller.reset_servo_motors()?;
+            break;
+        }
+
+    // =================================================================================
+
+    // =================================================================================
+    //                          ENTERING AUTONOMOUS MODE
+    
+        if input.button_y {
+            println!("Entering AUTONOMOUS mode");
+            next_mode = Some(DriveMode::Autonomous);
             break;
         }
 
@@ -460,7 +478,7 @@ fn run_manual_mode(
             (joystick_motor_speed, direction)
         };
 
-        let servo_angle = (MID_SERVO_ANGLE + (steering * SERVO_RANGE))
+        let servo_angle = (MID_SERVO_ANGLE + (steering * MID_SERVO_ANGLE))
             .clamp(MIN_SERVO_ANGLE, MAX_SERVO_ANGLE)
             .floor() as u32;
 
@@ -486,7 +504,115 @@ fn run_manual_mode(
     // =================================================================================
     }
 
-    Ok(())
+    Ok(next_mode)
+}
+
+fn run_autonomous_mode(
+    input_rx: &mpsc::Receiver<GamepadInput>,
+    controller: &MotorController,
+    perception_reader: &perception::PerceptionReader,
+) -> Result<Option<DriveMode>, Box<dyn std::error::Error>> {
+    println!("AUTONOMOUS MODE - Move sticks to OVERRIDE - Press B to exit");
+    let mut next_mode: Option<DriveMode> = None;
+
+    // Stanley configuration
+    let config = stanley::StanleyConfig::default();
+    
+    let mut prev_delta = 0.0;
+    let dt = 0.025; // 40Hz
+    let heading_gain = 40.0; // To be tuned
+
+    const TIMEOUT_MS: u128 = 100;
+
+    let mut last_servo: Option<u32> = None;
+
+    controller.send_motor_command(10, FORWARD)?;
+    let speed_mps = 10.0 * (100.0 / 3600.0);
+    loop {
+        // OVERRIDE: if human move joystick it overrides
+        if let Some(input) = recv_latest_input(input_rx, Duration::from_millis(10)) {
+            if input.analog_stick_left.y.abs() > 0.2 || input.analog_stick_right.x.abs() > 0.2 {
+                println!("(!) MANUEL OVERRIDE");
+                next_mode = Some(DriveMode::Manual);
+				break;
+            }
+            if input.button_b {
+                println!("Exiting AUTONOMOUS mode");
+                controller.stop_dc_motors()?;
+                controller.reset_servo_motors()?;
+                break;
+            }
+        }
+
+        let perception = perception_reader.read();
+        
+        // Watchdog: check timestamp age
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        
+        let age_ms = if now_ns > perception.timestamp as u128 {
+            (now_ns - perception.timestamp as u128) / 1_000_000
+        } else {
+            0
+        };
+
+        if age_ms > TIMEOUT_MS {
+            eprintln!("(!) PERCEPTION WATCHDOG TIMEOUT: {}ms", age_ms);
+            // controller.stop_dc_motors()?;
+            // controller.reset_servo_motors()?;
+            // break;
+        }
+        
+        // println!(
+        //     "[PERCEPTION] valid={} conf={:.2} cte={:.5} heading={:.5} speed={speed_mps}",
+        //     p.valid,
+        //     p.confidence,
+        //     -p.cte,
+        //     -p.heading_error
+        // );
+
+        if perception.valid == 1 {
+            let observation = stanley::CameraLaneObservation {
+                closest_front_point_m: perception.closest_front_point as f64,
+                heading_error_rad: stanley::normalize_heading(perception.heading_error as f64) * heading_gain,
+                confidence: perception.confidence as f64,
+            };
+            
+            let delta = stanley::compute_steering(
+                &observation,
+                speed_mps, // speed
+                prev_delta,
+                dt,
+                &config
+            );
+            println!(
+                "[STANLEY] cte={:.4} heading={:.6} prev_delta={:.4}",
+                observation.closest_front_point_m,
+                observation.heading_error_rad,
+                delta
+            );
+            prev_delta = delta;
+            
+            let servo_deg = stanley::steering_to_servo_deg(delta, &config) as u32;
+
+            if last_servo != Some(servo_deg) {
+                controller.send_servo_command(servo_deg)?;
+                last_servo = Some(servo_deg);
+            
+            }
+            println!("[CAN] servo={}", servo_deg);
+        }
+        // } else {
+            // Low confidence or invalid detection
+            // controller.stop_dc_motors()?;
+            // Keep servo at last position or center? 
+            // controller.reset_servo_motors()?;
+        // }
+
+        thread::sleep(Duration::from_millis(25)); // 40Hz control loop
+    }
+    Ok(next_mode)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -495,26 +621,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (input_rx, gamepad_handle) = spawn_gamepad_thread(GAMEPAD_DEVICE)?;
     let controller = MotorController::new(CAN_INTERFACE, CAN_ID_MOTOR, CAN_ID_SERVO)?;
     let mut prev_start_pressed = false;
+    let mut prev_select_pressed = false;
+    let mut requested_mode: Option<DriveMode> = None;
 
-    println!("Controller ready. Press START to enter manual mode, SELECT to exit.");
+    let perception_reader = perception::PerceptionReader::new("/dev/shm/perception.buf")?;
+
+    println!("Controller ready. Press START to enter MANUEL mode, SELECT for Autonomous, HOME to exit.");
 
     loop {
         let Some(input) = recv_latest_input(&input_rx, Duration::from_millis(50)) else {
             eprintln!("Gamepad input thread disconnected");
+            controller.stop_dc_motors()?;
+            controller.reset_servo_motors()?;
             break;
         };
 
-        if input.button_select {
+        if input.button_home {
             println!("Shutting down...");
             controller.stop_dc_motors()?;
             controller.reset_servo_motors()?;
             break;
         }
 
-        if input.button_start && !prev_start_pressed {
-            run_manual_mode(&input_rx, &controller)?;
-        }
+        let start_pressed = input.button_start && !prev_start_pressed;
+        let select_pressed = input.button_select && !prev_select_pressed;
         prev_start_pressed = input.button_start;
+        prev_select_pressed = input.button_select;
+
+        if start_pressed {
+            requested_mode = Some(DriveMode::Manual);
+        } else if select_pressed {
+            requested_mode = Some(DriveMode::Autonomous);
+        }
+
+        while let Some(mode) = requested_mode.take() {
+            match mode {
+                DriveMode::Manual => {
+                    requested_mode = run_manual_mode(&input_rx, &controller)?;
+                }
+                DriveMode::Autonomous => {
+                    requested_mode = run_autonomous_mode(&input_rx, &controller, &perception_reader)?;
+                }
+            }
+        }
     }
 
     drop(input_rx);
