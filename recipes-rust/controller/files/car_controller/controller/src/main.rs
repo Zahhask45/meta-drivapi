@@ -1,5 +1,6 @@
 use vehicle_control::*;
 
+use std::net::UdpSocket;
 use std::time::Duration;
 use std::thread;
 use std::sync::mpsc;
@@ -62,14 +63,14 @@ fn run_manual_mode(
     let mut cruise_speed: u32 = 0;
 
     let mut next_mode: Option<DriveMode> = None;
-    
+
 // =================================================================================
 
     loop {
 
     // =================================================================================
     //                          GAMEPAD INPUT THREAD
-    
+
         let Some(input) = recv_latest_input(input_rx, Duration::from_millis(25)) else {
             eprintln!("Gamepad input thread disconnected");
             controller.stop_dc_motors()?;
@@ -78,11 +79,11 @@ fn run_manual_mode(
         };
 
     // =================================================================================
-    
+
 
     // =================================================================================
     //                          EXITING MANUEL MODE
-    
+
         if input.button_b {
             println!("Exiting MANUEL mode");
             controller.stop_dc_motors()?;
@@ -94,7 +95,7 @@ fn run_manual_mode(
 
     // =================================================================================
     //                          ENTERING AUTONOMOUS MODE
-    
+
         if input.button_y {
             println!("Entering AUTONOMOUS mode");
             next_mode = Some(DriveMode::Autonomous);
@@ -102,11 +103,11 @@ fn run_manual_mode(
         }
 
     // =================================================================================
-    
+
 
     // =================================================================================
     //                          GAMEPAD INPUT VARIABLES
-    
+
         let steering = input.analog_stick_right.x;
         let throttle = input.analog_stick_left.y;
         let max_speed = input.button_r2;
@@ -114,11 +115,11 @@ fn run_manual_mode(
         let d_pad: bool = input.d_pad.y as i8 != 0;
 
     // =================================================================================
-    
-    
+
+
     // =================================================================================
     //                          DEFINING DIRECTION
-    
+
         let direction = if brake {
             BRAKE
         } else if throttle > 0.0 {
@@ -134,7 +135,7 @@ fn run_manual_mode(
 
     // =================================================================================
     //                          CHANGING CRUISE CONTROL SPEED VALUE
-    
+
         if cruise_control_enabled {
             if d_pad && !prev_d_pad {
                 if input.d_pad.y < 0.0 {
@@ -146,13 +147,13 @@ fn run_manual_mode(
             }
         }
         prev_d_pad = d_pad;
-        
+
     // =================================================================================
 
-    
+
     // =================================================================================
     //                          ACTIVATING CRUISE CONTROL
-    
+
         if input.button_l3 && !prev_cruise_button {
             if cruise_control_enabled {
                 cruise_control_enabled = false;
@@ -167,10 +168,10 @@ fn run_manual_mode(
 
     // =================================================================================
 
-    
+
     // =================================================================================
     //                      DEFINING SPEED AND ANGLES
-    
+
         let joystick_motor_speed = if max_speed {
             (throttle.abs() * MAX_MOTOR_SPEED).floor() as u32
         } else {
@@ -189,7 +190,7 @@ fn run_manual_mode(
 
     // =================================================================================
 
-    
+
     // =================================================================================
     //                          SENDING VALUES THROUGH CAN
 
@@ -205,7 +206,7 @@ fn run_manual_mode(
             prev_servo_angle = servo_angle;
             println!("Servo updated: {:.1}°\n Steering value: {steering}", servo_angle);
         }
-        
+
     // =================================================================================
     }
 
@@ -215,33 +216,35 @@ fn run_manual_mode(
 fn run_autonomous_mode(
     input_rx: &mpsc::Receiver<GamepadInput>,
     controller: &MotorController,
+    socket: &UdpSocket,
     perception_reader: &perception::PerceptionReader,
 ) -> Result<Option<DriveMode>, Box<dyn std::error::Error>> {
     println!("AUTONOMOUS MODE - Move sticks to OVERRIDE - Press B to exit");
     let mut next_mode: Option<DriveMode> = None;
     let mut prev_d_pad = false;
-    
+
     // Stanley configuration
     let config = stanley::StanleyConfig::default();
-    
+
     let mut prev_delta = 0.0;
     let dt = 0.025; // 40Hz
-    
+
     let mut filtered_angle: Option<f64> = None;
     const TIMEOUT_MS: u128 = 100;
-    
+
     let mut last_servo: Option<u32> = None;
     let mut speed: u32 = 15;
+    let mut direction: u8 = FORWARD;
     controller.send_motor_command(speed, FORWARD)?;
     let mut speed_mps: f64 = speed as f64 * (100.0 / 3600.0);
-    
-    
+
+
     // =================================================================================
-    
-    
+
+
     // =================================================================================
     //                      AUTONOMOUS LOOP
-    
+
     loop {
         // OVERRIDE: if human move joystick it overrides
         let Some(input) = recv_latest_input(input_rx, Duration::from_millis(25)) else {
@@ -262,15 +265,34 @@ fn run_autonomous_mode(
             controller.reset_servo_motors()?;
             break;
         }
-        
+
+        let mut buf = [0u8; 128];
+
+        while let Ok((size, _)) = socket.recv_from(&mut buf) {
+            let data = String::from_utf8_lossy(&buf[..size]);
+            let parts: Vec<&str> = data.trim().split(',').collect();
+
+            if parts.len() >= 2 {
+                speed = parts[0]
+                    .parse()
+                    .unwrap_or(speed)
+                    .min(MAX_MOTOR_SPEED as u32);
+
+                direction = parts[1].parse().unwrap_or(direction);
+
+                controller.send_motor_command(speed, direction)?;
+                speed_mps = speed as f64 * (100.0 / 3600.0);
+            }
+        }
+
         let d_pad: bool = input.d_pad.y as i8 != 0;
         let perception = perception_reader.read();
-        
+
         // Watchdog: check timestamp age
         let now_ns = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos();
-        
+
         let age_ms = if now_ns > perception.timestamp as u128 {
             (now_ns - perception.timestamp as u128) / 1_000_000
         } else {
@@ -297,7 +319,7 @@ fn run_autonomous_mode(
         }
         prev_d_pad = d_pad;
         speed_mps = speed as f64 * (100.0 / 3600.0);
-        
+
 
         if perception.valid > 0 {
 
@@ -316,7 +338,7 @@ fn run_autonomous_mode(
                 // heading_error_rad: stanley::normalize_heading(perception.heading_error as f64),
                 confidence: perception.confidence as f64,
             };
-            
+
             let raw_angle = stanley::compute_steering(
                 &observation,
                 speed_mps, // speed
@@ -346,7 +368,7 @@ fn run_autonomous_mode(
         } else {
             // Low confidence or invalid detection
             // controller.stop_dc_motors()?;
-            // Keep servo at last position or center? 
+            // Keep servo at last position or center?
             // controller.reset_servo_motors()?;
         }
 
@@ -363,6 +385,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut prev_start_pressed = false;
     let mut prev_select_pressed = false;
     let mut requested_mode: Option<DriveMode> = None;
+
+    let socket = UdpSocket::bind("127.0.0.1:5555")?;
+    socket.set_nonblocking(true)?;
 
     let perception_reader = perception::PerceptionReader::new("/dev/shm/perception.buf")?;
 
@@ -400,7 +425,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     requested_mode = run_manual_mode(&input_rx, &controller)?;
                 }
                 DriveMode::Autonomous => {
-                    requested_mode = run_autonomous_mode(&input_rx, &controller, &perception_reader)?;
+                    requested_mode = run_autonomous_mode(&input_rx, &controller, &socket, &perception_reader)?;
                 }
             }
         }
