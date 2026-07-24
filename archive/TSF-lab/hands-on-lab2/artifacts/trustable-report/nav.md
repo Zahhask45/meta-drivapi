@@ -1,6 +1,0 @@
-- [Compliance report](trustable_report_for_Software.md)
-- [Dashboard](dashboard.md)
-* [LLTC](LLTC.md)
-* [SRD](SRD.md)
-* [SWD](SWD.md)
-* [URD](URD.md)

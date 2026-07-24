@@ -1,9 +1,0 @@
-# Core ML & Computer Vision
-ultralytics
-opencv-python
-numpy
-pillow
-
-# Utils
-pathlib
-tqdm
